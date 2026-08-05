@@ -3,7 +3,7 @@
 De officiële [Homebrew](https://brew.sh/)-tap voor **OciDeck** — de macOS-cask.
 
 ```bash
-brew tap librekat/ocideck
+brew tap brennodewinter/ocideck
 brew install --cask ocideck
 ```
 
@@ -15,7 +15,7 @@ Linux-equivalent; een Linux-installatieroute loopt langs een eigen spoor.
 ## Onderhoud
 
 Deze repo is **canoniek op de eigen forge** (pawprint) en wordt naar GitHub
-gespiegeld, zodat de `librekat/ocideck`-shorthand werkt. `Casks/ocideck.rb` wordt
+gespiegeld, zodat de `brennodewinter/ocideck`-shorthand werkt. `Casks/ocideck.rb` wordt
 **automatisch bijgewerkt bij elke release** door de `homebrew-cask`-job in
 `.forgejo/workflows/release.yml` van de OciDeck-repo. Werk dit bestand niet met de
 hand bij, tenzij de automatische route uitvalt:
