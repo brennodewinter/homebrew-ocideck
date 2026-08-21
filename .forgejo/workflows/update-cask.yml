@@ -1,0 +1,77 @@
+name: Cask bijhouden
+
+# Waarom deze werkstroom in de tap staat en niet in de releaseketen:
+#
+# Tot 21-08-2026 duwde de release-job "Homebrew-cask bijwerken" in LibreKAT/Ocideck
+# de cask hierheen, met een persoonlijk toegangstoken in `HOMEBREW_TAP_TOKEN`. Dat
+# token is een los onderdeel dat stil kan sneuvelen: bij v0.4.8 weigerde de forge het
+# (HTTP 401) en stond de tap drie releases achter voordat iemand het merkte.
+#
+# Andersom werkt beter. De tap haalt zijn eigen cask op. Alles wat daarvoor nodig is
+# — de releaselijst, SHA256SUMS, het generatiescript en de sjabloon — is publiek
+# leesbaar, en het pushen gebeurt met het token dat Forgejo per run zelf aanmaakt en
+# dat alleen op déze repository slaat. Geen secret, niets dat kan verlopen.
+#
+# Het generatiescript blijft in de Ocideck-repo staan: één bron, daar getoetst
+# (test/homebrew_cask_test.dart). We halen het per run op bij de tag die we bouwen,
+# zodat script en sjabloon bij die release horen.
+on:
+  schedule:
+    # Elk half uur. Een cask die een half uur na de release bijtrekt is ruim op tijd
+    # — Homebrew-gebruikers draaien `brew update` op hun eigen moment. Het alternatief
+    # (meteen bij de release) vraagt een cross-repo token, en dat is precies wat we
+    # hier kwijt willen.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cask:
+    name: Cask op de laatste release brengen
+    runs-on: docker
+    # Hetzelfde voorgebakken image als de Ocideck-poorten: draagt node (voor
+    # actions/checkout), git en curl, dus geen apt-get per run.
+    container:
+      image: pawprint.vigilis.online/librekat/ocideck-ci:flutter-3.47.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cask genereren en bijwerken
+        run: |
+          set -euo pipefail
+
+          API="${GITHUB_SERVER_URL}/api/v1/repos/LibreKAT/Ocideck"
+
+          # Nieuwste stabiele release. draft/pre-release worden serverzijdig
+          # weggefilterd, zodat een -rc de tap nooit raakt.
+          TAG="$(curl -fsSL "$API/releases?limit=1&draft=false&pre-release=false" \
+            | tr ',' '\n' | sed -n 's/.*"tag_name":"\([^"]*\)".*/\1/p' | head -n1)"
+          if [ -z "$TAG" ]; then
+            echo "Geen stabiele release gevonden." >&2
+            exit 1
+          fi
+          echo "Nieuwste stabiele release: $TAG"
+
+          # Script en sjabloon bij die tag ophalen — één bron, in Ocideck getoetst.
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/homebrew"
+          curl -fsSLo "$WORK/update_homebrew_cask.sh" "$API/raw/scripts/update_homebrew_cask.sh?ref=$TAG"
+          curl -fsSLo "$WORK/homebrew/ocideck.rb.tmpl" "$API/raw/homebrew/ocideck.rb.tmpl?ref=$TAG"
+
+          TEMPLATE_FILE="$WORK/homebrew/ocideck.rb.tmpl" \
+            bash "$WORK/update_homebrew_cask.sh" "$TAG" "$GITHUB_WORKSPACE/Casks/ocideck.rb"
+
+          cd "$GITHUB_WORKSPACE"
+          if git diff --quiet -- Casks/ocideck.rb; then
+            echo "Cask staat al op $TAG — niets te doen."
+            exit 0
+          fi
+
+          git config user.name "OciDeck release"
+          git config user.email "release@librekat.nl"
+          git add Casks/ocideck.rb
+          git commit -m "OciDeck $TAG: update Homebrew cask"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+          {
+            echo "### ✅ Cask bijgewerkt naar $TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
