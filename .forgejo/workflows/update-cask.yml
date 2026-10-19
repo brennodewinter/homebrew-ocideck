@@ -35,6 +35,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Minisign-verificatie installeren
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends minisign
+
       - name: Cask genereren en bijwerken
         run: |
           set -euo pipefail
@@ -53,12 +58,13 @@ jobs:
 
           # Script en sjabloon bij die tag ophalen — één bron, in Ocideck getoetst.
           WORK="$(mktemp -d)"
-          mkdir -p "$WORK/homebrew"
-          curl -fsSLo "$WORK/update_homebrew_cask.sh" "$API/raw/scripts/update_homebrew_cask.sh?ref=$TAG"
+          mkdir -p "$WORK/scripts" "$WORK/homebrew"
+          curl -fsSLo "$WORK/scripts/update_homebrew_cask.sh" "$API/raw/scripts/update_homebrew_cask.sh?ref=$TAG"
           curl -fsSLo "$WORK/homebrew/ocideck.rb.tmpl" "$API/raw/homebrew/ocideck.rb.tmpl?ref=$TAG"
+          curl -fsSLo "$WORK/minisign.pub" "$API/raw/minisign.pub?ref=$TAG"
 
           TEMPLATE_FILE="$WORK/homebrew/ocideck.rb.tmpl" \
-            bash "$WORK/update_homebrew_cask.sh" "$TAG" "$GITHUB_WORKSPACE/Casks/ocideck.rb"
+            bash "$WORK/scripts/update_homebrew_cask.sh" "$TAG" "$GITHUB_WORKSPACE/Casks/ocideck.rb"
 
           cd "$GITHUB_WORKSPACE"
           if git diff --quiet -- Casks/ocideck.rb; then
