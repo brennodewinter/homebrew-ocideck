@@ -1,83 +1,103 @@
 name: Cask bijhouden
-
-# Waarom deze werkstroom in de tap staat en niet in de releaseketen:
-#
-# Tot 21-08-2026 duwde de release-job "Homebrew-cask bijwerken" in LibreKAT/Ocideck
-# de cask hierheen, met een persoonlijk toegangstoken in `HOMEBREW_TAP_TOKEN`. Dat
-# token is een los onderdeel dat stil kan sneuvelen: bij v0.4.8 weigerde de forge het
-# (HTTP 401) en stond de tap drie releases achter voordat iemand het merkte.
-#
-# Andersom werkt beter. De tap haalt zijn eigen cask op. Alles wat daarvoor nodig is
-# — de releaselijst, SHA256SUMS, het generatiescript en de sjabloon — is publiek
-# leesbaar, en het pushen gebeurt met het token dat Forgejo per run zelf aanmaakt en
-# dat alleen op déze repository slaat. Geen secret, niets dat kan verlopen.
-#
-# Het generatiescript blijft in de Ocideck-repo staan: één bron, daar getoetst
-# (test/homebrew_cask_test.dart). We halen het per run op bij de tag die we bouwen,
-# zodat script en sjabloon bij die release horen.
 on:
+  pull_request:
+  push:
+    branches: [main]
   schedule:
-    # Elk half uur. Een cask die een half uur na de release bijtrekt is ruim op tijd
-    # — Homebrew-gebruikers draaien `brew update` op hun eigen moment. Het alternatief
-    # (meteen bij de release) vraagt een cross-repo token, en dat is precies wat we
-    # hier kwijt willen.
     - cron: '*/30 * * * *'
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: Existing signed macOS release (empty selects latest)
+        required: false
+        default: ''
+      operation_id:
+        description: Durable caller nonce for an explicit update
+        required: false
+        default: ''
+      pin:
+        description: Keep this rollback target until the next explicit normal publication
+        required: false
+        default: 'false'
+concurrency:
+  group: homebrew-channel-main
+  cancel-in-progress: false
 jobs:
-  cask:
-    name: Cask op de laatste release brengen
+  validate:
     runs-on: docker
-    # Hetzelfde voorgebakken image als de Ocideck-poorten: draagt node (voor
-    # actions/checkout), git en curl, dus geen apt-get per run.
     container:
-      image: pawprint.vigilis.online/librekat/ocideck-ci:flutter-3.47.0
+      image: pawprint.vigilis.online/librekat/ocideck-ci:flutter-3.47.7@sha256:9fb20e45072635824e4a8dd0895b7cbe172bd3b063ef65fd5ad08b3127e177c2
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Minisign-verificatie installeren
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate selector and checked-in cask
         run: |
+          set -eu
           apt-get update -qq
-          apt-get install -y --no-install-recommends minisign
-
-      - name: Cask genereren en bijwerken
+          apt-get install -y --no-install-recommends ruby minisign
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          ruby -c Casks/ocideck.rb
+  cask:
+    needs: validate
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: docker
+    timeout-minutes: 30
+    container:
+      image: pawprint.vigilis.online/librekat/ocideck-ci:flutter-3.47.7@sha256:9fb20e45072635824e4a8dd0895b7cbe172bd3b063ef65fd5ad08b3127e177c2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+      - name: Prepare verification tools
+        run: |
+          set -eu
+          apt-get update -qq
+          apt-get install -y --no-install-recommends minisign ruby
+      - name: Verify and update selected macOS pointer
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          OPERATION_ID: ${{ inputs.operation_id }}
+          PIN: ${{ inputs.pin }}
+        shell: bash
         run: |
           set -euo pipefail
-
-          API="${GITHUB_SERVER_URL}/api/v1/repos/LibreKAT/Ocideck"
-
-          # Nieuwste stabiele release. draft/pre-release worden serverzijdig
-          # weggefilterd, zodat een -rc de tap nooit raakt.
-          TAG="$(curl -fsSL "$API/releases?limit=1&draft=false&pre-release=false" \
-            | tr ',' '\n' | sed -n 's/.*"tag_name":"\([^"]*\)".*/\1/p' | head -n1)"
-          if [ -z "$TAG" ]; then
-            echo "Geen stabiele release gevonden." >&2
-            exit 1
-          fi
-          echo "Nieuwste stabiele release: $TAG"
-
-          # Script en sjabloon bij die tag ophalen — één bron, in Ocideck getoetst.
+          BASE="$(git rev-parse HEAD)"
           WORK="$(mktemp -d)"
-          mkdir -p "$WORK/scripts" "$WORK/homebrew"
-          curl -fsSLo "$WORK/scripts/update_homebrew_cask.sh" "$API/raw/scripts/update_homebrew_cask.sh?ref=$TAG"
-          curl -fsSLo "$WORK/homebrew/ocideck.rb.tmpl" "$API/raw/homebrew/ocideck.rb.tmpl?ref=$TAG"
-          curl -fsSLo "$WORK/minisign.pub" "$API/raw/minisign.pub?ref=$TAG"
-
-          TEMPLATE_FILE="$WORK/homebrew/ocideck.rb.tmpl" \
-            bash "$WORK/scripts/update_homebrew_cask.sh" "$TAG" "$GITHUB_WORKSPACE/Casks/ocideck.rb"
-
-          cd "$GITHUB_WORKSPACE"
-          if git diff --quiet -- Casks/ocideck.rb; then
-            echo "Cask staat al op $TAG — niets te doen."
-            exit 0
+          trap 'rm -rf -- "$WORK"' EXIT
+          case "$PIN" in ''|false) PIN_ARGS=();; true) PIN_ARGS=(--pin);; *) exit 2;; esac
+          python3 scripts/update_channel.py --tag "${RELEASE_TAG:-}" --operation-id "${OPERATION_ID:-}" "${PIN_ARGS[@]}" --output "$WORK/result.json"
+          ruby -c Casks/ocideck.rb
+          git diff --check
+          test -z "$(git diff --name-only -- . ':!Casks/ocideck.rb' ':!channel-policy.json')"
+          UNTRACKED="$(git ls-files --others --exclude-standard)"
+          [[ -z "$UNTRACKED" || "$UNTRACKED" = channel-policy.json ]]
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE"
+          if ! git diff --quiet -- Casks/ocideck.rb channel-policy.json || [ "$UNTRACKED" = channel-policy.json ]; then
+            git config user.name 'OciDeck release'
+            git config user.email release@librekat.nl
+            git add -A -- Casks/ocideck.rb
+            if [ -e channel-policy.json ] || git ls-files --error-unmatch channel-policy.json >/dev/null 2>&1; then
+              git add -A -- channel-policy.json
+            fi
+            git commit -m "Update verified macOS release pointer"
+            git push origin HEAD:refs/heads/main
           fi
-
-          git config user.name "OciDeck release"
-          git config user.email "release@librekat.nl"
-          git add Casks/ocideck.rb
-          git commit -m "OciDeck $TAG: update Homebrew cask"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-
-          {
-            echo "### ✅ Cask bijgewerkt naar $TAG"
-          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p homebrew-receipt
+          COMMIT="$(git rev-parse HEAD)"
+          export COMMIT
+          python3 - "$WORK/result.json" <<'PYRECEIPT'
+          import json, os, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          value['commit'] = os.environ['COMMIT']
+          pathlib.Path('homebrew-receipt/homebrew-channel.json').write_text(json.dumps(value, sort_keys=True) + '\n')
+          PYRECEIPT
+      - name: Preserve exact policy and cask receipt
+        if: ${{ inputs.operation_id != '' }}
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: homebrew-channel-${{ inputs.operation_id }}
+          path: homebrew-receipt/homebrew-channel.json
+          if-no-files-found: error
+          retention-days: 90

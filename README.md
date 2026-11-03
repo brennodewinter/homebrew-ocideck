@@ -1,44 +1,56 @@
 # Homebrew tap voor OciDeck
 
-De officiële [Homebrew](https://brew.sh/)-tap voor **OciDeck** — de macOS-cask.
+De officiële macOS-cask, canoniek op Pawprint en gespiegeld naar GitHub:
 
-```bash
+```sh
 brew tap brennodewinter/ocideck
 brew install --cask ocideck
 ```
 
-De cask is alleen een verwijzing: hij draagt de download-URL van de release en de
-SHA-256 die rechtstreeks uit de gepubliceerde `SHA256SUMS` komt, zodat `brew` ons
-eigen artefact ophaalt en verifieert. **macOS-only** — Homebrew Cask kent geen
-Linux-equivalent; een Linux-installatieroute loopt langs een eigen spoor.
+De cask bevat uitsluitend de download-URL en de door minisign geauthenticeerde
+SHA256 van het gepubliceerde macOS-archief. Linux en Windows hebben eigen
+releasekanalen; hun publicatie verandert deze cask niet.
 
-## Onderhoud
+## Bijwerken en terugzetten
 
-Deze repo is **canoniek op de eigen forge** (pawprint) en wordt naar GitHub
-gespiegeld, zodat de `brennodewinter/ocideck`-shorthand werkt.
+`update-cask.yml` draait elk half uur. De selector zoekt de hoogste stabiele,
+niet verlaten, publieke release die daadwerkelijk een macOS-archief en complete
+getekende metadata heeft: legacy `SHA256SUMS` of het afzonderlijke macOS-manifest
+met kanaalchecksums. Een nieuwere Windows-only release wordt overgeslagen;
+onvolledige macOS-metadata en ongeldige handtekeningen stoppen de update.
 
-`Casks/ocideck.rb` wordt **door deze repo zelf bijgewerkt**, niet door de
-releaseketen van OciDeck. `.forgejo/workflows/update-cask.yml` draait elk half
-uur, leest de nieuwste stabiele release publiek uit, haalt
-`scripts/update_homebrew_cask.sh` en `homebrew/ocideck.rb.tmpl` op bij díe tag,
-genereert de cask en pusht — met het token dat Forgejo per run voor deze
-repository aanmaakt. Staat de cask al goed, dan committeert hij niets.
+Voor een expliciete publicatie heeft de workflow deze inputs:
 
-Daardoor is er **geen enkel geheim** in het spel. Tot v0.4.8 duwde de OciDeck-repo
-de cask hierheen met een persoonlijk toegangstoken; dat token werd na een
-Forgejo-upgrade geweigerd en de tap stond drie releases achter voordat iemand het
-merkte. De keerzijde van de huidige opzet is dat de cask maximaal een half uur
-achterloopt op een release — voor een tap betekenisloos, want `brew update` draait
-op de klok van de gebruiker.
+- `tag`: bestaande stabiele macOS-release, bijvoorbeeld `v0.7.6`.
+- `operation_id`: unieke nonce van de aanroepende releasecontroller.
+- `pin`: `false` voor normale publicatie, `true` voor expliciete rollback.
 
-Werk `Casks/ocideck.rb` niet met de hand bij. Moet het toch — de werkstroom ligt
-stil, of je wilt niet op de volgende ronde wachten — draai hem dan met de hand af
-(*Actions → Cask bijhouden → Run workflow*), of genereer met hetzelfde script:
+Een rollback met `pin=true` bewaart `channel-policy.json` in Git. De planning
+respecteert dit doel ook als later een nieuwere macOS-release verschijnt.
+De volgende expliciete normale publicatie met `pin=false` verwijdert die hold.
+Tag of releasebestanden worden nooit overschreven. De aanroepende controller
+controleert de huidige verwijzing en de getekende oudere doelversie vóór rollback.
 
-```bash
-scripts/update_homebrew_cask.sh <tag> Casks/ocideck.rb
+Iedere run leest OciDeck-main eenmaal en haalt generator, sjabloon, controle en
+verlaten-versiesbeleid uitsluitend bij die volledige commit-SHA op. De publieke
+sleutel staat hier vast ingecheckt en moet bytegelijk zijn; code uit de gekozen
+releasetag wordt niet uitgevoerd. Downloads zijn begrensd, uitsluitend HTTPS en
+zonder redirects. Alleen cask en policy mogen veranderen; push mislukt wanneer
+tap-main inmiddels is verplaatst. Een expliciete run bewaart het bewijsbestand
+`homebrew-channel-<operation_id>/homebrew-channel.json` met de resulterende
+Git-commit, caskhash, tag en pinstatus. Een groen uploadbewijs wordt door de
+controller gevolgd door publieke URL/SHA256-controle.
+
+## Controle
+
+De gepinde Linux-workflow draait dezelfde lichte controles voor elke PR en
+main-push; een push activeert uitsluitend validatie, geen pointerwijziging:
+
+```sh
+python3 -m unittest discover -s scripts -p 'test_*.py'
+ruby -c Casks/ocideck.rb
 ```
 
-Zie `docs/BUILD.md` §"Homebrew cask" in de OciDeck-repo voor de volledige opzet,
-en `docs/CHECKS.md` voor de dagelijkse controle die nakijkt of deze tap en zijn
-spiegel werkelijk op de laatste release staan.
+De tests omvatten echte minisign-handtekening/tampercontrole, Mac-selectie,
+Windows-only releases, gedeeltelijke metadata, policy en het wissen van een pin.
+De bestaande cask is met deze proceswijziging niet naar een andere versie gezet.
