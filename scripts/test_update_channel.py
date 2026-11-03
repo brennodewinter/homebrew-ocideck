@@ -106,6 +106,24 @@ class SelectionTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 channel.verify_signature(sums, public)
 
+    def test_legacy_verifier_needs_no_new_channel_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            (root / 'homebrew').mkdir()
+            (root / 'homebrew/ocideck.rb.tmpl').write_text('unused')
+            digest = 'a' * 64
+            url = channel.RELEASES + 'v0.7.6/ocideck-macos-0.7.6.zip'
+            generator = root / 'scripts/update_homebrew_cask.sh'
+            generator.write_text('#!/bin/bash\nset -eu\ncat > "$2" <<EOF\n  version "0.7.6"\n  sha256 "' + digest + '"\n  url "' + url + '"\nEOF\n')
+            (root / 'scripts/verify_homebrew_cask.sh').write_text('#!/bin/bash\ntest "$#" -eq 1 && test "$1" = v0.7.6\n')
+            sums = (digest + '  ocideck-macos-0.7.6.zip\n').encode()
+            with patch.object(channel, 'fetch', side_effect=lambda address: b'signature' if address.endswith('.minisig') else sums), patch.object(channel, 'verify_signature'):
+                channel.verified_generate(root, 'v0.7.6', 'legacy', release('v0.7.6', 'legacy'), root / 'out.rb')
+            with patch.object(channel, 'fetch', side_effect=lambda address: b'signature' if address.endswith('.minisig') else sums.replace(b'aaaa', b'bbbb', 1)), patch.object(channel, 'verify_signature'):
+                with self.assertRaisesRegex(ValueError, 'identity differs'):
+                    channel.verified_generate(root, 'v0.7.6', 'legacy', release('v0.7.6', 'legacy'), root / 'out.rb')
+
     def test_insecure_fetch_rejected_before_network(self):
         for url in ('http://example.org', 'https://user:secret@example.org'):
             with self.assertRaises(ValueError):
