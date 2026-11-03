@@ -115,7 +115,7 @@ class SelectionTest(unittest.TestCase):
             digest = 'a' * 64
             url = channel.RELEASES + 'v0.7.6/ocideck-macos-0.7.6.zip'
             generator = root / 'scripts/update_homebrew_cask.sh'
-            generator.write_text('#!/bin/bash\nset -eu\nprintf '  version "0.7.6"\\n  sha256 "' + digest + '"\\n  url "' + url + '"\\n' > "$2"\n')
+            generator.write_text('#!/bin/bash\nset -eu\ncat > "$2" <<EOF\n  version "0.7.6"\n  sha256 "' + digest + '"\n  url "' + url + '"\nEOF\n')
             (root / 'scripts/verify_homebrew_cask.sh').write_text('#!/bin/bash\ntest "$#" -eq 1 && test "$1" = v0.7.6\n')
             sums = (digest + '  ocideck-macos-0.7.6.zip\n').encode()
             with patch.object(channel, 'fetch', side_effect=lambda address: b'signature' if address.endswith('.minisig') else sums), patch.object(channel, 'verify_signature'):
