@@ -91,7 +91,7 @@ class SelectionTest(unittest.TestCase):
     def test_changed_source_key_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch.object(channel, 'data', return_value={'object': {'sha': 'a' * 40}}), patch.object(channel, 'fetch', return_value=b'changed'):
+            with patch.object(channel, 'data', return_value=[{'ref': 'refs/heads/main', 'object': {'sha': 'a' * 40}}]), patch.object(channel, 'fetch', return_value=b'changed'):
                 with self.assertRaisesRegex(ValueError, 'key changed'):
                     channel.trusted_tools(root)
 
