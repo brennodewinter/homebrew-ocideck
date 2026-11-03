@@ -21,6 +21,23 @@ def release(tag, mode='macos'):
 
 
 class SelectionTest(unittest.TestCase):
+    def test_actual_forgejo_ref_list_is_read_before_trusted_downloads(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(channel, 'data', return_value=[{'ref': 'refs/heads/main', 'object': {'sha': 'a' * 40}}]), \
+                patch.object(channel, 'fetch', side_effect=OSError('download reached')) as fetch:
+            with self.assertRaisesRegex(OSError, 'download reached'):
+                channel.trusted_tools(Path(directory))
+            self.assertIn('ref=' + 'a' * 40, fetch.call_args.args[0])
+
+    def test_prefix_matches_or_duplicate_refs_never_reach_downloads(self):
+        exact = {'ref': 'refs/heads/main', 'object': {'sha': 'a' * 40}}
+        for value in ([], [dict(exact, ref='refs/heads/main-old')], [exact, exact]):
+            with tempfile.TemporaryDirectory() as directory, \
+                    patch.object(channel, 'data', return_value=value), patch.object(channel, 'fetch') as fetch:
+                with self.assertRaises(ValueError):
+                    channel.trusted_tools(Path(directory))
+                fetch.assert_not_called()
+
     def test_windows_only_latest_does_not_hide_older_mac(self):
         windows = dict(tag_name='v0.7.8', draft=False, prerelease=False, assets=[{'name': 'ocideck-windows-x64-0.7.8.zip'}])
         self.assertEqual(channel.choose([windows, release('v0.7.6', 'legacy')], set()), ('v0.7.6', 'legacy'))

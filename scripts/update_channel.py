@@ -124,7 +124,11 @@ def choose(releases, exclusions, explicit='', pinned=None):
 
 
 def trusted_tools(directory):
-    source = data(API + '/git/refs/heads/main').get('object', {}).get('sha', '')
+    response = data(API + '/git/refs/heads/main')
+    refs = response if isinstance(response, list) else [response]
+    if len(refs) != 1 or not isinstance(refs[0], dict) or refs[0].get('ref') != 'refs/heads/main':
+        raise ValueError('trusted source exact main ref unavailable or ambiguous')
+    source = refs[0].get('object', {}).get('sha', '')
     if not re.fullmatch('[0-9a-f]{40}', source) or source == '0' * 40:
         raise ValueError('trusted source main SHA unavailable')
     for name in ('scripts/update_homebrew_cask.sh', 'scripts/verify_homebrew_cask.sh',
