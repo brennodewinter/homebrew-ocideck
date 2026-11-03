@@ -165,10 +165,15 @@ def verified_generate(directory, tag, mode, release, output):
     hashes = re.findall(r'^\s*sha256 "([0-9a-f]{64})"$', cask, re.M)
     urls = re.findall(r'^\s*url "([^"\n]+)"$', cask, re.M)
     expected_url = RELEASES + tag + '/ocideck-macos-' + tag[1:] + '.zip'
-    if len(hashes) != 1 or urls != [expected_url]:
+    asset = 'ocideck-macos-' + tag[1:] + '.zip'
+    expected_hashes = []
+    for line in sums.read_text().splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].removeprefix('./') == asset:
+            expected_hashes.append(parts[0].lower())
+    if len(hashes) != 1 or hashes != expected_hashes or urls != [expected_url]:
         raise ValueError('generated cask identity differs')
-    subprocess.run(['bash', str(directory / 'scripts/verify_homebrew_cask.sh'), '--expected-url', expected_url,
-                    '--expected-sha256', hashes[0], tag],
+    subprocess.run(['bash', str(directory / 'scripts/verify_homebrew_cask.sh'), tag],
                    env=dict(env, CASK_FILE=str(output)), check=True, timeout=120)
     return hashlib.sha256(output.read_bytes()).hexdigest()
 
