@@ -1,8 +1,8 @@
 cask "ocideck" do
-  version "0.7.6"
-  sha256 "15c0592ceb1a5ab0274fefda19f19022f8a3a3f67857eb288f949a8d69074c97"
+  version "0.7.7"
+  sha256 "bb79622f7103f2cf018f9051a78cafc000db25d36fdb3a8cc219e4a1372582f8"
 
-  url "https://pawprint.vigilis.online/LibreKAT/Ocideck/releases/download/v0.7.6/ocideck-macos-0.7.6.zip"
+  url "https://pawprint.vigilis.online/LibreKAT/Ocideck/releases/download/v0.7.7/ocideck-macos-0.7.7.zip"
   name "OciDeck"
   desc "Open-source presentation app for decks, notes, and collaborative sessions"
   homepage "https://ocideck.librekat.nl"
